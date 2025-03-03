@@ -1,4 +1,6 @@
 #include <coroutine>
+#include <exception>
+#include <iostream>
 #include <thread>
 
 template<typename PromiseType>
@@ -45,4 +47,74 @@ struct Generator {
         }
     };
     std::coroutine_handle<promise_type> handle_;
+};
+
+/// A generic generator class.
+template <typename T> struct GenericGenerator {
+  // Forward-declare promise type to typedef handle_type.
+  struct promise_type;
+  using handle_type = std::coroutine_handle<promise_type>;
+
+  struct promise_type {
+    T value_;
+    // The generic generator will be able to catch and rethrow exceptions.
+    std::exception_ptr exception_;
+    GenericGenerator get_return_object() {
+      return GenericGenerator(handle_type::from_promise(*this));
+    }
+    // Declaring initial_suspend with type std::susend_always means that we will
+    // have to call awaiter.resume before we can get the initial value out of
+    // the awaiter.
+    std::suspend_always initial_suspend() { return {}; }
+    std::suspend_always final_suspend() noexcept { return {}; }
+    // Set the excpetion ptr to point to the current exception. We will create a
+    // method that will rethrow this excpetion.
+    void unhandled_exception() { exception_ = std::current_exception(); }
+    // Use a C++20 concept to assign a constraint on the template to choose the
+    // correct overload.
+    template <std::convertible_to<T> From>
+    std::suspend_always yield_value(From &&from) {
+      // Forward to the correct overload.
+      value_ = std::forward<From>(from);
+      return {};
+    }
+    // Indicates that the promise returns void.
+    void return_void() {}
+  };
+
+  handle_type handle_;
+  // Allow move-only construction from another Generator.
+  GenericGenerator(const GenericGenerator &) = delete;
+  GenericGenerator(handle_type h) : handle_(h) {}
+
+  // Destroy the coro handle inside the Generator's destructor,
+  // as it will no longer be needed once the Generator is destroyed.
+  ~GenericGenerator() {
+    handle_.destroy();
+    std::cout << "Destroyed Generator and coro handle\n";
+  }
+
+  explicit operator bool() {
+    fill();
+    return !handle_.done();
+  }
+
+  T operator()() {
+    fill();
+    full_ = false;
+    return std::move(handle_.promise().value_);
+  }
+
+private:
+  bool full_ = false;
+  void fill() {
+    if (!full_) {
+      handle_();
+      // Rethrow any exceptions here.
+      if (handle_.promise().exception_) {
+        std::rethrow_exception(handle_.promise().exception_);
+      }
+      full_ = true;
+    }
+  }
 };

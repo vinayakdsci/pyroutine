@@ -1,7 +1,4 @@
-#include <iostream>
-
 #include "coro.h"
-
 
 /// Produces an infinite stream of numbers.
 Generator getGenerator() {
@@ -10,17 +7,16 @@ Generator getGenerator() {
         co_yield i;
 }
 
+GenericGenerator<int32_t> getGenericGenerator() {
+  for (int32_t i = 0;;) {
+    co_yield i++;
+  }
+}
 
 int main() {
-    auto handle = getGenerator().handle_;
-    auto &promise = handle.promise();
-    
-    for(int i = 0; i < 10; ++i) {
-        std::cout << "Counter: " << promise.value_ << "\n";
-        handle();
-    }
-    
-    // Cleans up the handle's allocated memory.
-    handle.destroy();
-    return 0;
+  auto generator = getGenericGenerator();
+  for (int32_t i = 0; i < 20; ++i) {
+    std::cout << "Counter: " << generator() << "\n";
+  }
+  return 0;
 }
